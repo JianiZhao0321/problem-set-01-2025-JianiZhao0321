@@ -1,6 +1,6 @@
 ---
 title: "Text as Data: Problem Set 01"
-author: "Professor Tiago Ventura"
+author: "Jiani"
 execute: 
   error: true
 format:
@@ -12,11 +12,11 @@ theme: default
 
 ## Instructions
 
-To complete this homework, you have two options. 
+To complete this homework, you have two options.
 
-You can either complete this assignment using a **dataset of your choice**. This is a great opportunity for you to start working with a dataset that you can potentially use for your final project. 
+You can either complete this assignment using a **dataset of your choice**. This is a great opportunity for you to start working with a dataset that you can potentially use for your final project.
 
-Your second option is to this dataset of social media posts from political candidates running for Congress during the 2022 U.S. Midterm election. 
+Your second option is to this dataset of social media posts from political candidates running for Congress during the 2022 U.S. Midterm election.
 
 You can download the dataset [here](https://www.dropbox.com/scl/fi/jz14130dlzj5xvca9txj4/midterm_candidates_labeled_all_May05.csv?rlkey=b0m1h6kk1af3uz9tjqyelthh3&dl=0)
 
@@ -26,38 +26,269 @@ If you want say thanks to the people who collected and shared this data with us 
 
 **IMPORTANT:** Remember to NOT commit your data to github. Github does not allow you to push large datasets to remote repositories. If you commit your dataset, you will need to reset your commit, and that's always a bit of work. In addition, remember that your notebook should be compiled with the results of the code blocks.
 
-## Question 1 
+## Question 1 ---------------------------------------------
 
 Take a small a sample of your documents and read them carefully. This sample doesn't need to be random. Select cases that are more interesting, and close to your theoretical interest in this dataset. What are you thoughts about these documents? What did you learn after reading them?
 
-## Question 2 
+```{r Q1}
 
-Tokenize your documents and pre-process them, removing any "extraneous" content you noticed in closely reading a sample of your documents. What content have you removed and why? Any pre-processing steps from what you saw in class that you consider not to use here? 
+library(tidyverse)
+library(quanteda)
+library(preText)
+
+# read the speech file
+ecb_speeches <- read_delim(
+  "~/Dev/PPOL6081/fraccaroli_arel-bundock_blyth_replication_20250523/data/all_ECB_speeches_20240426.csv",
+  delim = "|")
+
+# show first rows
+head(ecb_speeches)
+
+# detect the speeches related to poverty and inequality
+poverty_speeches <- ecb_speeches %>%
+  filter(str_detect(contents, regex("poverty|inequality|deprivation|income distribution|social inclusion", ignore_case = TRUE)) |
+         str_detect(title, regex("poverty|inequality|deprivation|income distribution|social inclusion", ignore_case = TRUE)) |
+         str_detect(subtitle, regex("poverty|inequality|deprivation|income distribution|social inclusion", ignore_case = TRUE)))
+
+```
+
+-   I selected three speeches — by Cipollone (2024), Schnabel (2023), and Lagarde (2022) — because they directly engage with themes of wages, living standards, and vulnerable households. Reading them closely, I observed that the ECB seldom uses the word “poverty” directly, but instead frames the issue through terms such as “low-income households,” “income distribution,” and “social cohesion.”
+-   The speeches highlight how inflation disproportionately affects poorer groups, particularly via energy and food prices, while also stressing the need for wage recovery to sustain consumption. At the same time, they caution against excessive wage growth that might fuel inflation. These texts taught me that the ECB treats poverty and inequality as macroeconomic risks to stability rather than as social problems per se.
+
+## Question 2 -----------------------------------------------------
+
+Tokenize your documents and pre-process them, removing any "extraneous" content you noticed in closely reading a sample of your documents. What content have you removed and why? Any pre-processing steps from what you saw in class that you consider not to use here?
+
+```{r Q2}
+# 0) create corpus 
+poverty_corpus <- corpus(poverty_speeches, text_field = "contents")
+
+# see the output
+summary(poverty_corpus,  n = 5)
+class(poverty_corpus)
+str(poverty_corpus)
+
+# 1) tokenization
+# remove the punctuation, numbers, symbols, and URLs
+poverty_tokens_raw <- tokens(
+  poverty_corpus,
+  remove_punct   = TRUE,
+  remove_numbers = TRUE,
+  remove_symbols = TRUE,
+  remove_url     = TRUE
+)
+
+#str(poverty_tokens_raw)
+#poverty_speeches$contents[1]
+
+# 2) Lowercase + stopwords + custom "extraneous" terms
+extraneous_terms <- c(
+  stopwords("en"),
+  "speech","slides","member","executive","board","president","vice",
+  "chart","figure","source","note","notes",
+  "ecb","eurostat","bce","eib","iea","imf","oecd",
+  "http","https","www",
+  "frankfurt","brussels","european","union","eu"
+)
+
+poverty_tokens <- poverty_tokens_raw %>%
+  tokens_tolower() %>%
+  tokens_remove(extraneous_terms, padding = FALSE)
+
+# 3) n-grams
+poverty_tokens_ng <- tokens_ngrams(poverty_tokens, n = 1:2)
+
+# 4) build Document–Feature Matrix(dfm) 
+dfm_poverty <- dfm(poverty_tokens_ng)
+
+# 5) trim extremes: appear in <5% of docs or >95% of docs
+dfm_poverty_trim <- dfm_trim(
+  dfm_poverty,
+  min_docfreq = 0.05,
+  max_docfreq = 0.95,
+  docfreq_type = "prop",
+  verbose = TRUE)
+  
+# 6) quick inspection
+topfeatures(dfm_poverty_trim, 100)
+featnames(dfm_poverty_trim)[1:50]
+
+domain_stopwords <- c(
+  "euro", "euro_area", "monetary", "policy", "monetary_policy",
+  "ecb", "central", "bank", "banks", "european", "union"
+)
+
+dfm_poverty_trim2 <- dfm_remove(dfm_poverty_trim, pattern = domain_stopwords)
+
+topfeatures(dfm_poverty_trim2, 100)
 
 
-## Question 3
+# wordcloud
+library(quanteda.textplots)
 
-Using [Danny and Spirling's Pretext](https://github.com/matthewjdenny/preText), tell me which of the pre-processing steps makes a more substantive difference in the data transformation? Would you keep all these steps or would you follow the PreText recommendations? Use a sample of the data to solve this question. 
+textplot_wordcloud(
+  dfm_poverty_trim2,
+  random_order = FALSE,
+  rotation = .25,
+  max_words = 100,
+  min_size = 0.5,
+  max_size = 2.8)
+```
 
-## Question 4 
+-   I removed two sets of terms at different stages:
+-    At the beginning, I dropped generic stopwords, filler words (like slides, notes), and some institutional names (like IMF, OECD) that don’t carry substantive meaning.
+-   Later, I removed domain-specific stopwords (ECB, monetary, policy, euro, bank) because they appear in almost every document and don’t help discriminate between speeches.
 
-Pick an important source of variation in your data (for example: date, author identity, location, etc.). Subset the data along this dimension, and discuss which words discriminate better each group. You can do this by using TF-IDF, PMI, log(share $word_i$ in group a/share $word_i$ in b), or create a measure similar to Ban's article. 
+## Question 3---------------------------------------------
 
-## Question 5
+Using [Danny and Spirling's Pretext](https://github.com/matthewjdenny/preText), tell me which of the pre-processing steps makes a more substantive difference in the data transformation? Would you keep all these steps or would you follow the PreText recommendations? Use a sample of the data to solve this question.
 
-Create a dictionary (or use a pre-existing dictionary) to measure a topic of interest in your data. It can be anything, sentiment, tone, misinformation, any topic of interest. Label your documents, and visualize the prevalence of your classes. 
+```{r Q3}
+pacman::p_load(quanteda, preText, dplyr)
 
+# Run factorial preprocessing (tries different combinations)
+preproc_docs <- factorial_preprocessing(
+  poverty_corpus,
+  use_ngrams = FALSE,         
+  infrequent_term_threshold = 0.2, # drop rare terms
+  verbose = TRUE)
 
-## Question 6
+# Run preText
+pretext_results <- preText(
+  preproc_docs,
+  dataset_name = "ECB Poverty Speeches",
+  distance_method = "cosine",
+  num_comparisons = 20,  # how many random comparisons
+  verbose = TRUE
+)
 
-Pick some documents (at least 10 for each class) that are exemplar (high probability) of being for each class of your dictionary. Read these documents.  Now let's try to augment a little your classifier.
+# Plot the scores
+preText_score_plot(pretext_results)
 
-### Question 6.1
+# Regression coefficients: which steps matter?
+regression_coefficient_plot(pretext_results,
+                            remove_intercept = TRUE)
 
-Using cosine similarity, grab the closest 10 documents to each reference document you read before. Read those. How well does the cosine similarity work? Try with another measure of distance. Anything interesting there? 
+```
 
+which preprocessing steps matter most? - Among all the cleaning steps, punctuation removal changes ECB speeches the most, followed by stemming and dropping rare words. Stopword removal has some effect, while numbers and lowercasing hardly matter. This suggests we should be cautious with punctuation and stemming, but we can safely lowercase and remove numbers.
 
-### Question 6.2
+Would I keep all the steps? - I would keep basic cleaning (lowercasing, numbers, stopwords), but I would avoid stemming and punctuation removal, since PreText shows they alter the data the most and risk losing important meaning.
+
+## Question 4 ---------------------------------------------
+
+Pick an important source of variation in your data (for example: date, author identity, location, etc.). Subset the data along this dimension, and discuss which words discriminate better each group. You can do this by using TF-IDF, PMI, log(share $word_i$ in group a/share $word_i$ in b), or create a measure similar to Ban's article.
+
+```{r Q4}
+
+# create dfm grouped by speaker
+dfm_by_speaker <- dfm_poverty_trim2 %>%
+  dfm() %>%
+  dfm_group(groups = docvars(poverty_corpus, "speakers"))
+
+dfm_by_speaker
+
+dfm_tfidf_speaker <- dfm_tfidf(dfm_by_speaker, scheme_tf = "prop")
+
+# look at top features per speaker
+topfeatures(dfm_tfidf_speaker["Christine Lagarde", ], 20)
+topfeatures(dfm_tfidf_speaker["Isabel Schnabel", ], 20)
+topfeatures(dfm_tfidf_speaker["Piero Cipollone", ], 20)
+
+```
+
+-   Lagarde uses more political and thematic language (climate, women, governance).
+-   Schnabel uses technical slide-based and climate-related terms.
+-   Cipollone relies on statistical and inflation-related language.
+
+## Question 5---------------------------------------------
+
+Create a dictionary (or use a pre-existing dictionary) to measure a topic of interest in your data. It can be anything, sentiment, tone, misinformation, any topic of interest. Label your documents, and visualize the prevalence of your classes.
+
+```{r Q5}
+library(quanteda.dictionaries)
+data_dictionary_LSD2015
+
+# apply dictionary
+dfm_sentiment <- dfm_lookup(dfm_poverty_trim2, dictionary = data_dictionary_LSD2015)
+
+# inspect first rows
+head(dfm_sentiment)
+
+# aggregate by year
+docvars(poverty_corpus, "year") <- lubridate::year(docvars(poverty_corpus, "date"))
+
+sent_by_year <- convert(dfm_sentiment, to="data.frame") %>%
+  mutate(year = docvars(poverty_corpus, "year")) %>%
+  group_by(year) %>%
+  summarise(across(c(positive, negative), sum))
+
+sent_by_year
+
+sent_by_year_long <- tidyr::pivot_longer(sent_by_year, cols=c(positive, negative),
+                                         names_to="sentiment", values_to="count")
+
+ggplot(sent_by_year_long, aes(x=year, y=count, fill=sentiment)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  labs(title="Positive vs Negative Tone in ECB Poverty Speeches",
+       x="Year", y="Word Counts")
+
+```
+
+## Question 6---------------------------------------------
+
+Pick some documents (at least 10 for each class) that are exemplar (high probability) of being for each class of your dictionary. Read these documents. Now let's try to augment a little your classifier.
+
+### Question 6.1 ----------------------------------------------------
+
+Using cosine similarity, grab the closest 10 documents to each reference document you read before. Read those. How well does the cosine similarity work? Try with another measure of distance. Anything interesting there?
+
+```{r Q6}
+library(quanteda.textstats)
+
+# Build TF-IDF dfm
+dfm_tfidf_speeches <- dfm_tfidf(dfm_poverty_trim2, scheme_tf = "prop")
+
+# cosine similarity
+simil_speeches <- textstat_simil(dfm_tfidf_speeches,  
+                                 margin = "documents",
+                                 method = "cosine")
+                                 
+sim_matrix <- as.matrix(simil_speeches)
+
+# Add labels (speaker + date to avoid duplicates)
+doc_ids <- paste(docvars(poverty_corpus, "speakers"),
+                 docvars(poverty_corpus, "date"),
+                 sep = "_")
+rownames(sim_matrix) <- doc_ids
+colnames(sim_matrix) <- doc_ids
+
+# Example: Isabel Schnabel cosine neighbors
+cosine_neighbors <- sort(sim_matrix[grep("Isabel Schnabel", rownames(sim_matrix))[1], ],
+                         decreasing = TRUE)[2:11] 
+                         
+# --- Euclidean Distance ---
+dist_speeches_euc <- textstat_dist(dfm_tfidf_speeches, method = "euclidean")
+dist_matrix <- as.matrix(dist_speeches_euc)
+
+rownames(dist_matrix) <- doc_ids
+colnames(dist_matrix) <- doc_ids
+
+# Example: Isabel Schnabel Euclidean neighbors
+euclidean_neighbors <- sort(dist_matrix[grep("Isabel Schnabel", rownames(dist_matrix))[1], ])[1:10]
+
+# --- Side-by-side comparison ---
+cosine_neighbors
+euclidean_neighbors    
+```
+
+-   Using cosine similarity, Isabel Schnabel’s speeches cluster mainly with her own other speeches, plus a few from Draghi and Cœuré. This makes sense because cosine captures proportional word use and is length-invariant, so it highlights consistent style and topical focus.
+
+-   Using Euclidean distance, her closest neighbors include Philip Lane and Vítor Constâncio. Euclidean is more sensitive to document length and raw word counts, so it groups speeches that are similar in size and density, even if the proportions differ.
+
+### Question 6.2----------------------------------------------------
 
 Now, check qualitative these documents. Take a look at the top features, keyword in Context, higher TF-IDF. Would you change anything in your dictionary now that you looked in these documents?
 
+-   ECB speeches rarely use “poverty” explicitly. They frame it via inequality, wages, employment, and social cohesion. Updating your dictionary makes it better aligned with ECB’s discourse style, ensuring you capture more substantively relevant documents.
